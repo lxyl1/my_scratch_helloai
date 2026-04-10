@@ -7,11 +7,12 @@
   <link rel="stylesheet" href="./styles.css" />
 </head>
 <body>
+  <script>window.__BUILD__ = '2026-04-10-1';</script>
   <header class="site-header">
     <div class="container">
       <h1 class="site-title">上传 Scratch 作品</h1>
       <nav class="actions">
-        <a href="./index.html">返回列表</a>
+        <a id="link-back" href="./index.html">返回列表</a>
       </nav>
     </div>
   </header>
@@ -63,6 +64,12 @@
     function storage() {
       try { return window.localStorage; } catch { return null; }
     }
+    (function bindCacheBustLinks() {
+      const v = window.__BUILD__ || '';
+      if (!v) return;
+      const back = document.getElementById('link-back');
+      if (back) back.href = `./index.html?v=${encodeURIComponent(v)}`;
+    })();
     function getConfig() {
       const s = storage();
       if (!s) return {};

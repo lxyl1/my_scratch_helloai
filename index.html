@@ -7,12 +7,13 @@
   <link rel="stylesheet" href="./styles.css" />
 </head>
 <body>
+  <script>window.__BUILD__ = '2026-04-10-1';</script>
   <header class="site-header">
     <div class="container">
       <h1 class="site-title">我的 Scratch 作品库</h1>
       <nav class="actions">
         <button id="btn-refresh">刷新列表</button>
-        <a class="primary" href="./upload.html">上传作品</a>
+        <a class="primary" id="link-upload" href="./upload.html">上传作品</a>
         <button id="btn-settings" title="站点设置">设置</button>
       </nav>
     </div>
@@ -95,7 +96,7 @@
       });
       goUpload.addEventListener('click', () => {
         dlg.close();
-        location.href = './upload.html';
+        location.href = `./upload.html?v=${encodeURIComponent(window.__BUILD__ || '')}`;
       });
       save.addEventListener('click', (e) => {
         const owner = document.getElementById('cfg-owner').value.trim();
@@ -108,6 +109,12 @@
         saveConfig({ owner, repo, branch });
       });
     }
+    (function bindCacheBustLinks() {
+      const v = window.__BUILD__ || '';
+      if (!v) return;
+      const linkUpload = document.getElementById('link-upload');
+      if (linkUpload) linkUpload.href = `./upload.html?v=${encodeURIComponent(v)}`;
+    })();
     function toRawUrl({ owner, repo, branch, path }) {
       return `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${path}`;
     }
