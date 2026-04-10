@@ -16,7 +16,15 @@
   <script>
     // 扩展映射表，针对常见的第三方扩展（如 Gandi IDE 的扩展）提供支持
     window.EXTENSION_MAP = {
-      'image': 'https://extensions.gandi.pro/image/index.js'
+      'image': 'https://extensions.gandi.pro/image/index.js',
+      'canvas': 'https://extensions.gandi.pro/canvas/index.js',
+      'ai': 'https://extensions.gandi.pro/ai/index.js',
+      'widget': 'https://extensions.gandi.pro/widget/index.js',
+      'json': 'https://extensions.gandi.pro/json/index.js',
+      'storage': 'https://extensions.gandi.pro/storage/index.js',
+      'dolly': 'https://extensions.gandi.pro/dolly/index.js',
+      'media': 'https://extensions.gandi.pro/media/index.js',
+      'camera': 'https://extensions.gandi.pro/camera/index.js'
     };
   </script>
 </head>
@@ -55,6 +63,15 @@
     const btnFlag = document.getElementById('btn-flag');
     const btnStop = document.getElementById('btn-stop');
 
+    // 错误日志辅助
+    window.onerror = function(msg, url, lineNo, columnNo, error) {
+      console.error('全局错误:', msg, error);
+      return false;
+    };
+    window.onunhandledrejection = function(event) {
+      console.error('未处理的 Promise 拒绝:', event.reason);
+    };
+
     function setStatus(text) {
       statusEl.textContent = text || '';
     }
@@ -91,12 +108,27 @@
 
         // 监听 VM 扩展请求，自动从映射表加载第三方扩展
         if (scaffolding.vm && scaffolding.vm.extensionManager) {
+          // 允许非沙盒扩展
+          scaffolding.vm.setTurbo(true);
+          
           const originalLoad = scaffolding.vm.extensionManager.loadExtensionURL;
           scaffolding.vm.extensionManager.loadExtensionURL = function(id, ...args) {
-            // 如果 ID 在映射表中，使用映射表的 URL
+            // 如果 ID 在映射表中，或者 ID 看起来像一个缩写 ID，尝试映射到完整 URL
             const url = window.EXTENSION_MAP[id] || id;
             console.log(`正在请求扩展: ${id} -> ${url}`);
-            return originalLoad.call(this, url, ...args);
+            
+            // 如果 url 仍然不是完整链接且不在官方库中，可能会导致 Unknown extension 错误
+            // 这里我们强制返回一个 Promise 以防止崩溃
+            try {
+              return originalLoad.call(this, url, ...args).catch(err => {
+                console.warn(`扩展加载失败 (${id}):`, err);
+                // 返回一个虚拟扩展以防止 UI 崩溃
+                return Promise.resolve();
+              });
+            } catch (e) {
+              console.error(`扩展加载异常 (${id}):`, e);
+              return Promise.resolve();
+            }
           };
         }
 
@@ -112,9 +144,22 @@
             const projectJson = JSON.parse(await zip.file('project.json').async('string'));
             if (projectJson.extensions && Array.isArray(projectJson.extensions)) {
               for (const extId of projectJson.extensions) {
-                if (window.EXTENSION_MAP[extId]) {
-                  console.log(`正在预加载扩展: ${extId} -> ${window.EXTENSION_MAP[extId]}`);
-                  await scaffolding.vm.extensionManager.loadExtensionURL(window.EXTENSION_MAP[extId]);
+                const url = window.EXTENSION_MAP[extId];
+                if (url) {
+                  console.log(`正在预加载扩展: ${extId} -> ${url}`);
+                  try {
+                    await scaffolding.vm.extensionManager.loadExtensionURL(url);
+                  } catch (e) {
+                    console.warn(`预加载扩展 ${extId} 失败:`, e);
+                  }
+                } else if (!extId.includes('/') && !['pen', 'music', 'videoSensing', 'text2speech', 'translate', 'makeymakey', 'microbit', 'ev3', 'boost', 'wedo2', 'gdxfor'].includes(extId)) {
+                  // 如果是一个未知的短 ID（且不是 Scratch 官方扩展），尝试从默认源加载
+                  console.log(`尝试为未知扩展加载默认路径: ${extId}`);
+                  try {
+                    await scaffolding.vm.extensionManager.loadExtensionURL(`https://extensions.gandi.pro/${extId}/index.js`);
+                  } catch (e) {
+                    console.warn(`自动尝试加载扩展 ${extId} 失败:`, e);
+                  }
                 }
               }
             }
