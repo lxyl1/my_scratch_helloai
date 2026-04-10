@@ -38,6 +38,7 @@
       <p class="small">提示：程序会从该仓库的 /projects 目录实时读取 .sb3 文件并展示。</p>
       <menu>
         <button value="cancel">取消</button>
+        <button id="go-upload" type="button">去上传</button>
         <button id="save-settings" value="default" class="primary">保存</button>
       </menu>
     </form>
@@ -84,12 +85,17 @@
       const dlg = document.getElementById('settings-dialog');
       const btn = document.getElementById('btn-settings');
       const save = document.getElementById('save-settings');
+      const goUpload = document.getElementById('go-upload');
       btn.addEventListener('click', () => {
         const cfg = getConfig();
         document.getElementById('cfg-owner').value = cfg.owner || '';
         document.getElementById('cfg-repo').value = cfg.repo || '';
         document.getElementById('cfg-branch').value = cfg.branch || 'main';
         dlg.showModal();
+      });
+      goUpload.addEventListener('click', () => {
+        dlg.close();
+        location.href = './upload.html';
       });
       save.addEventListener('click', (e) => {
         const owner = document.getElementById('cfg-owner').value.trim();
