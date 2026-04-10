@@ -33,7 +33,7 @@
     } else {
       const container = document.getElementById('player');
       const iframe = document.createElement('iframe');
-      const src = `https://turbowarp.org/?project_url=${encodeURIComponent(fileUrl)}&autoplay`;
+      const src = `https://turbowarp.org/embed?project_url=${encodeURIComponent(fileUrl)}&autoplay&settings-button`;
       iframe.src = src;
       iframe.width = '482';
       iframe.height = '412';
@@ -47,7 +47,7 @@
       container.appendChild(iframe);
 
       const open = document.createElement('a');
-      open.href = src;
+      open.href = `https://turbowarp.org/?project_url=${encodeURIComponent(fileUrl)}&autoplay`;
       open.target = '_blank';
       open.rel = 'noreferrer';
       open.textContent = '在 TurboWarp 打开';
