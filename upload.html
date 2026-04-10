@@ -143,6 +143,48 @@
     function encodeGitHubPath(path) {
       return path.split('/').map(encodeURIComponent).join('/');
     }
+    async function readJsonSafe(res) {
+      const ct = (res.headers.get('content-type') || '').toLowerCase();
+      if (ct.includes('application/json')) {
+        try { return await res.json(); } catch { return null; }
+      }
+      try {
+        const t = await res.text();
+        return t ? { message: t } : null;
+      } catch {
+        return null;
+      }
+    }
+    async function checkTokenAndRepoAccess({ owner, repo, branch, token }) {
+      const headers = {
+        'Accept': 'application/vnd.github+json',
+        'Authorization': `Bearer ${token}`
+      };
+
+      log('校验令牌...');
+      const meRes = await fetch('https://api.github.com/user', { headers });
+      if (!meRes.ok) {
+        const data = await readJsonSafe(meRes);
+        const msg = data && data.message ? data.message : 'unknown';
+        throw new Error(`令牌校验失败：${meRes.status} - ${msg}（请确认 PAT 有效且未过期）`);
+      }
+
+      log('校验仓库访问权限...');
+      const repoRes = await fetch(`https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`, { headers });
+      if (!repoRes.ok) {
+        const data = await readJsonSafe(repoRes);
+        const msg = data && data.message ? data.message : 'unknown';
+        throw new Error(`仓库不可访问：${repoRes.status} - ${msg}（请确认 owner/repo 正确，并且 PAT 已授权该仓库且具备 Contents 读写权限）`);
+      }
+
+      log('校验分支是否存在...');
+      const brRes = await fetch(`https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/branches/${encodeURIComponent(branch)}`, { headers });
+      if (!brRes.ok) {
+        const data = await readJsonSafe(brRes);
+        const msg = data && data.message ? data.message : 'unknown';
+        throw new Error(`分支不存在或不可访问：${brRes.status} - ${msg}（请确认分支名，例如 main）`);
+      }
+    }
     async function upload() {
       log('开始上传...');
       const { owner, repo, branch, token } = getFormValues();
@@ -157,6 +199,7 @@
         alert('请选择 .sb3 文件');
         return;
       }
+      await checkTokenAndRepoAccess({ owner, repo, branch, token });
       const targetName = (document.getElementById('filename').value.trim() || file.name).replace(/\\s+/g, '_');
       const path = `projects/${targetName}`;
       log(`准备上传到 ${owner}/${repo}@${branch}:${path}`);
@@ -173,8 +216,12 @@
         const data = await getRes.json();
         sha = data.sha || '';
         log('检测到同名文件，执行覆盖提交');
-      } else {
+      } else if (getRes.status === 404) {
         log('未检测到同名文件，执行新增提交');
+      } else {
+        const data = await readJsonSafe(getRes);
+        const msg = data && data.message ? data.message : 'unknown';
+        throw new Error(`读取同名文件信息失败：${getRes.status} - ${msg}`);
       }
       const body = {
         message: (sha ? 'Update' : 'Add') + ` Scratch project ${targetName}`,
@@ -185,8 +232,9 @@
       log('正在提交到 GitHub...');
       const putRes = await fetch(apiBase, { method: 'PUT', headers, body: JSON.stringify(body) });
       if (!putRes.ok) {
-        const t = await putRes.text();
-        throw new Error('上传失败：' + putRes.status + ' ' + t);
+        const data = await readJsonSafe(putRes);
+        const msg = data && data.message ? data.message : 'unknown';
+        throw new Error(`上传失败：${putRes.status} - ${msg}`);
       }
       const result = await putRes.json();
       log('上传成功，提交SHA：' + result.commit.sha.slice(0, 7));
