@@ -179,9 +179,15 @@
         node.querySelector('.title').textContent = it.name.replace(/\.sb3$/i, '');
         const sizeMB = (it.size / (1024 * 1024)).toFixed(2);
         node.querySelector('.sub').textContent = `大小 ${sizeMB} MB`;
-        const relativePath = it.path || it.name;
-        const fileUrl = new URL(relativePath, location.href).href;
-        node.querySelector('.play').href = `./player.html?file=${encodeURIComponent(fileUrl)}&title=${encodeURIComponent(it.name.replace(/\\.sb3$/i,''))}`;
+        
+        const fileUrl = toRawUrl({
+          owner: cfg.owner,
+          repo: cfg.repo,
+          branch: cfg.branch,
+          path: it.path || it.name
+        });
+        
+        node.querySelector('.play').href = `./player.html?file=${encodeURIComponent(fileUrl)}&title=${encodeURIComponent(it.name.replace(/\.sb3$/i, ''))}`;
         node.querySelector('.download').href = fileUrl;
         container.appendChild(node);
       });

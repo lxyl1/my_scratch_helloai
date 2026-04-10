@@ -5,6 +5,20 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Scratch 在线演示</title>
   <link rel="stylesheet" href="./styles.css" />
+  <style>
+    .player-toolbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px}
+    .player-toolbar button{padding:8px 12px;border:1px solid #d0d7de;background:#fff;border-radius:6px;cursor:pointer}
+    .player-toolbar button.primary{background:#0969da;color:#fff;border-color:#0969da}
+    .scaffolding-host{width:100%;height:min(72vh,520px);min-height:412px}
+  </style>
+  <script src="https://unpkg.com/@turbowarp/scaffolding@0.3.0/dist/scaffolding-min.js"></script>
+  <script src="https://unpkg.com/jszip/dist/jszip.min.js"></script>
+  <script>
+    // 扩展映射表，针对常见的第三方扩展（如 Gandi IDE 的扩展）提供支持
+    window.EXTENSION_MAP = {
+      'image': 'https://extensions.gandi.pro/image/index.js'
+    };
+  </script>
 </head>
 <body>
   <header class="site-header">
@@ -17,8 +31,14 @@
   </header>
 
   <main class="container">
-    <div id="player" class="player-wrap"></div>
-    <p class="small">提示：如无法加载，点击“在 TurboWarp 打开”尝试。</p>
+    <div class="player-toolbar">
+      <button id="btn-load" class="primary" type="button">加载作品</button>
+      <button id="btn-flag" type="button" disabled>绿旗</button>
+      <button id="btn-stop" type="button" disabled>停止</button>
+      <span id="status" class="small"></span>
+    </div>
+    <div id="player" class="player-wrap scaffolding-host"></div>
+    <p class="small">提示：首次加载需要下载作品文件和素材，加载完成后点击“绿旗”开始运行。</p>
   </main>
 
   <script>
@@ -28,31 +48,128 @@
     const fileUrl = qs('file');
     const title = qs('title') || 'Scratch 在线演示';
     document.getElementById('project-title').textContent = title;
-    if (!fileUrl) {
-      alert('缺少作品文件地址');
-    } else {
-      const container = document.getElementById('player');
-      const iframe = document.createElement('iframe');
-      const src = `https://turbowarp.org/embed?project_url=${encodeURIComponent(fileUrl)}&autoplay&settings-button`;
-      iframe.src = src;
-      iframe.width = '482';
-      iframe.height = '412';
-      iframe.setAttribute('allowtransparency', 'true');
-      iframe.setAttribute('frameborder', '0');
-      iframe.setAttribute('scrolling', 'no');
-      iframe.setAttribute('allowfullscreen', '');
-      iframe.style.colorScheme = 'auto';
-      iframe.style.maxWidth = '100%';
-      iframe.style.borderRadius = '6px';
-      container.appendChild(iframe);
 
-      const open = document.createElement('a');
-      open.href = `https://turbowarp.org/?project_url=${encodeURIComponent(fileUrl)}&autoplay`;
-      open.target = '_blank';
-      open.rel = 'noreferrer';
-      open.textContent = '在 TurboWarp 打开';
-      open.className = 'tw-open';
-      container.insertAdjacentElement('afterend', open);
+    const container = document.getElementById('player');
+    const statusEl = document.getElementById('status');
+    const btnLoad = document.getElementById('btn-load');
+    const btnFlag = document.getElementById('btn-flag');
+    const btnStop = document.getElementById('btn-stop');
+
+    function setStatus(text) {
+      statusEl.textContent = text || '';
+    }
+
+    if (!fileUrl) {
+      setStatus('缺少作品文件地址');
+      btnLoad.disabled = true;
+    } else if (!window.Scaffolding || !window.Scaffolding.Scaffolding) {
+      setStatus('播放器加载失败：无法加载运行时脚本（请检查网络是否能访问 unpkg.com）');
+      btnLoad.disabled = true;
+    } else {
+      let scaffolding = null;
+      let loaded = false;
+
+      async function loadProject() {
+        setStatus('正在下载作品...');
+        btnLoad.disabled = true;
+        btnFlag.disabled = true;
+        btnStop.disabled = true;
+        loaded = false;
+
+        if (scaffolding) {
+          try { scaffolding.dispose(); } catch (_) {}
+          scaffolding = null;
+          container.innerHTML = '';
+        }
+
+        scaffolding = new window.Scaffolding.Scaffolding();
+        scaffolding.width = 480;
+        scaffolding.height = 360;
+        scaffolding.resizeMode = 'preserve-ratio';
+        scaffolding.setup();
+        scaffolding.appendTo(container);
+
+        // 监听 VM 扩展请求，自动从映射表加载第三方扩展
+        if (scaffolding.vm && scaffolding.vm.extensionManager) {
+          const originalLoad = scaffolding.vm.extensionManager.loadExtensionURL;
+          scaffolding.vm.extensionManager.loadExtensionURL = function(id, ...args) {
+            // 如果 ID 在映射表中，使用映射表的 URL
+            const url = window.EXTENSION_MAP[id] || id;
+            console.log(`正在请求扩展: ${id} -> ${url}`);
+            return originalLoad.call(this, url, ...args);
+          };
+        }
+
+        const res = await fetch(fileUrl, { cache: 'no-store' });
+        if (!res.ok) throw new Error('作品文件下载失败：' + res.status);
+        const buf = await res.arrayBuffer();
+        setStatus('正在加载作品...');
+
+        // 尝试从作品文件中解析出扩展列表并预加载
+        try {
+          if (window.JSZip) {
+            const zip = await JSZip.loadAsync(buf);
+            const projectJson = JSON.parse(await zip.file('project.json').async('string'));
+            if (projectJson.extensions && Array.isArray(projectJson.extensions)) {
+              for (const extId of projectJson.extensions) {
+                if (window.EXTENSION_MAP[extId]) {
+                  console.log(`正在预加载扩展: ${extId} -> ${window.EXTENSION_MAP[extId]}`);
+                  await scaffolding.vm.extensionManager.loadExtensionURL(window.EXTENSION_MAP[extId]);
+                }
+              }
+            }
+          }
+        } catch (e) {
+          console.warn('解析扩展列表失败:', e);
+        }
+
+        await scaffolding.loadProject(buf);
+
+        loaded = true;
+        btnFlag.disabled = false;
+        btnStop.disabled = false;
+        btnLoad.disabled = false;
+        setStatus('加载完成');
+      }
+
+      btnLoad.addEventListener('click', () => {
+        loadProject().catch(err => {
+          console.error(err);
+          setStatus('加载失败：' + (err && err.message ? err.message : String(err)));
+          btnLoad.disabled = false;
+          loaded = false;
+        });
+      });
+
+      btnFlag.addEventListener('click', () => {
+        if (!loaded || !scaffolding) return;
+        try {
+          scaffolding.greenFlag();
+          setStatus('运行中');
+        } catch (err) {
+          console.error(err);
+          setStatus('运行失败：' + (err && err.message ? err.message : String(err)));
+        }
+      });
+
+      btnStop.addEventListener('click', () => {
+        if (!loaded || !scaffolding) return;
+        try {
+          scaffolding.stopAll();
+          setStatus('已停止');
+        } catch (err) {
+          console.error(err);
+          setStatus('停止失败：' + (err && err.message ? err.message : String(err)));
+        }
+      });
+
+      setStatus('正在准备加载...');
+      loadProject().catch(err => {
+        console.error(err);
+        setStatus('加载失败：' + (err && err.message ? err.message : String(err)));
+        btnLoad.disabled = false;
+        loaded = false;
+      });
     }
   </script>
 </body>
