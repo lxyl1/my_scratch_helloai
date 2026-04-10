@@ -118,8 +118,9 @@
     function toRawUrl({ owner, repo, branch, path }) {
       return `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${path}`;
     }
-    async function fetchProjects(cfg) {
-      const api = `https://api.github.com/repos/${cfg.owner}/${cfg.repo}/contents/projects?ref=${encodeURIComponent(cfg.branch)}`;
+    async function fetchContents(cfg, dirPath) {
+      const suffix = dirPath ? `/contents/${encodeURIComponent(dirPath)}` : '/contents';
+      const api = `https://api.github.com/repos/${cfg.owner}/${cfg.repo}${suffix}?ref=${encodeURIComponent(cfg.branch)}`;
       const token = getToken();
       const headers = { 'Accept': 'application/vnd.github+json' };
       if (token) headers.Authorization = `Bearer ${token}`;
@@ -144,8 +145,25 @@
         }
         throw new Error(`GitHub API 返回异常: ${res.status}${detail ? ' - ' + detail : ''}${extra}`);
       }
-      const items = await res.json();
-      return items.filter(it => /\.sb3$/i.test(it.name));
+      return await res.json();
+    }
+    async function fetchProjects(cfg) {
+      const [projectsDir, rootDir] = await Promise.all([
+        fetchContents(cfg, 'projects'),
+        fetchContents(cfg, '')
+      ]);
+      const all = []
+        .concat(Array.isArray(projectsDir) ? projectsDir : [])
+        .concat(Array.isArray(rootDir) ? rootDir : []);
+      const byPath = new Map();
+      for (const it of all) {
+        if (!it || typeof it.name !== 'string') continue;
+        if (!/\.sb3$/i.test(it.name)) continue;
+        if (it.type && it.type !== 'file') continue;
+        const key = it.path || it.name;
+        if (!byPath.has(key)) byPath.set(key, it);
+      }
+      return Array.from(byPath.values());
     }
     function renderList(items, cfg) {
       const container = document.getElementById('cards');
@@ -161,7 +179,7 @@
         node.querySelector('.title').textContent = it.name.replace(/\.sb3$/i, '');
         const sizeMB = (it.size / (1024 * 1024)).toFixed(2);
         node.querySelector('.sub').textContent = `大小 ${sizeMB} MB`;
-        const fileUrl = toRawUrl({ owner: cfg.owner, repo: cfg.repo, branch: cfg.branch, path: `projects/${it.name}` });
+        const fileUrl = toRawUrl({ owner: cfg.owner, repo: cfg.repo, branch: cfg.branch, path: it.path || it.name });
         node.querySelector('.play').href = `./player.html?file=${encodeURIComponent(fileUrl)}&title=${encodeURIComponent(it.name.replace(/\\.sb3$/i,''))}`;
         node.querySelector('.download').href = fileUrl;
         container.appendChild(node);
