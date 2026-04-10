@@ -59,12 +59,16 @@
 
   <script>
     const CONFIG_KEY = 'scratch_site_config';
+    const TOKEN_KEY = 'scratch_site_token';
     function getConfig() {
       const raw = localStorage.getItem(CONFIG_KEY);
       if (raw) {
         try { return JSON.parse(raw); } catch (_) {}
       }
       return { owner: '', repo: '', branch: 'main' };
+    }
+    function getToken() {
+      return localStorage.getItem(TOKEN_KEY) || '';
     }
     function saveConfig(cfg) {
       localStorage.setItem(CONFIG_KEY, JSON.stringify(cfg));
@@ -103,9 +107,30 @@
     }
     async function fetchProjects(cfg) {
       const api = `https://api.github.com/repos/${cfg.owner}/${cfg.repo}/contents/projects?ref=${encodeURIComponent(cfg.branch)}`;
-      const res = await fetch(api, { headers: { 'Accept': 'application/vnd.github+json' } });
+      const token = getToken();
+      const headers = { 'Accept': 'application/vnd.github+json' };
+      if (token) headers.Authorization = `Bearer ${token}`;
+      const res = await fetch(api, { headers });
       if (res.status === 404) return [];
-      if (!res.ok) throw new Error('GitHub API 返回异常: ' + res.status);
+      if (!res.ok) {
+        const remaining = res.headers.get('x-ratelimit-remaining');
+        const reset = res.headers.get('x-ratelimit-reset');
+        let detail = '';
+        try {
+          const data = await res.json();
+          if (data && typeof data.message === 'string') detail = data.message;
+        } catch (_) {
+          try { detail = await res.text(); } catch (_) {}
+        }
+        let extra = '';
+        if (res.status === 403 && remaining === '0' && reset) {
+          const t = new Date(Number(reset) * 1000);
+          extra = `（API 限流，将在 ${t.toLocaleString()} 后恢复；可在上传页保存 PAT 以提高额度）`;
+        } else if (res.status === 403) {
+          extra = '（可能是 API 限流/访问受限；可在上传页保存 PAT 以提高额度）';
+        }
+        throw new Error(`GitHub API 返回异常: ${res.status}${detail ? ' - ' + detail : ''}${extra}`);
+      }
       const items = await res.json();
       return items.filter(it => /\.sb3$/i.test(it.name));
     }
