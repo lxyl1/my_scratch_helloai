@@ -35,8 +35,8 @@
       </div>
       <p class="small">提示：令牌至少需要 <b>contents:write</b> 权限。令牌仅保存在本地浏览器的 localStorage，不会上传到服务器。</p>
       <div class="inline-actions">
-        <button id="btn-save">保存到本地</button>
-        <button id="btn-clear">清除本地配置</button>
+        <button id="btn-save" type="button">保存到本地</button>
+        <button id="btn-clear" type="button">清除本地配置</button>
       </div>
     </section>
 
@@ -51,7 +51,7 @@
         </label>
       </div>
       <div class="inline-actions">
-        <button id="btn-upload" class="primary">开始上传</button>
+        <button id="btn-upload" type="button" class="primary">开始上传</button>
       </div>
       <pre id="log" class="log"></pre>
     </section>
@@ -60,17 +60,28 @@
   <script>
     const CONFIG_KEY = 'scratch_site_config';
     const TOKEN_KEY = 'scratch_site_token';
+    function storage() {
+      try { return window.localStorage; } catch { return null; }
+    }
     function getConfig() {
-      try { return JSON.parse(localStorage.getItem(CONFIG_KEY) || '{}'); } catch { return {}; }
+      const s = storage();
+      if (!s) return {};
+      try { return JSON.parse(s.getItem(CONFIG_KEY) || '{}'); } catch { return {}; }
     }
     function saveConfig(cfg) {
-      localStorage.setItem(CONFIG_KEY, JSON.stringify(cfg));
+      const s = storage();
+      if (!s) return;
+      s.setItem(CONFIG_KEY, JSON.stringify(cfg));
     }
     function saveToken(token) {
-      if (token) localStorage.setItem(TOKEN_KEY, token);
+      const s = storage();
+      if (!s) return;
+      if (token) s.setItem(TOKEN_KEY, token);
     }
     function getToken() {
-      return localStorage.getItem(TOKEN_KEY) || '';
+      const s = storage();
+      if (!s) return '';
+      return s.getItem(TOKEN_KEY) || '';
     }
     function bindConfig() {
       const cfg = getConfig();
@@ -92,8 +103,11 @@
         alert('已保存本地配置');
       });
       document.getElementById('btn-clear').addEventListener('click', () => {
-        localStorage.removeItem(CONFIG_KEY);
-        localStorage.removeItem(TOKEN_KEY);
+        const s = storage();
+        if (s) {
+          s.removeItem(CONFIG_KEY);
+          s.removeItem(TOKEN_KEY);
+        }
         alert('已清除');
         location.reload();
       });
@@ -111,15 +125,28 @@
       el.textContent += msg + '\\n';
       el.scrollTop = el.scrollHeight;
     }
+    function getFormValues() {
+      const cfg = getConfig();
+      const owner = (cfg.owner || document.getElementById('cfg-owner').value).trim();
+      const repo = (cfg.repo || document.getElementById('cfg-repo').value).trim();
+      const branch = ((cfg.branch || document.getElementById('cfg-branch').value).trim() || 'main');
+      const token = (getToken() || document.getElementById('cfg-token').value).trim();
+      return { owner, repo, branch, token };
+    }
+    function encodeGitHubPath(path) {
+      return path.split('/').map(encodeURIComponent).join('/');
+    }
     async function upload() {
-      const { owner, repo, branch } = getConfig();
-      const token = getToken();
+      log('开始上传...');
+      const { owner, repo, branch, token } = getFormValues();
       const file = document.getElementById('file').files[0];
       if (!owner || !repo || !token) {
-        alert('请先保存仓库配置和令牌');
+        log('缺少信息：owner/repo/token');
+        alert('请先填写并保存：GitHub 用户/组织、仓库名、PAT');
         return;
       }
       if (!file) {
+        log('缺少文件：未选择 .sb3');
         alert('请选择 .sb3 文件');
         return;
       }
@@ -128,7 +155,7 @@
       log(`准备上传到 ${owner}/${repo}@${branch}:${path}`);
       const buf = new Uint8Array(await file.arrayBuffer());
       const content = b64encode(buf);
-      const apiBase = `https://api.github.com/repos/${owner}/${repo}/contents/${encodeURIComponent(path)}`;
+      const apiBase = `https://api.github.com/repos/${owner}/${repo}/contents/${encodeGitHubPath(path)}`;
       const headers = {
         'Accept': 'application/vnd.github+json',
         'Authorization': `Bearer ${token}`
@@ -148,6 +175,7 @@
         branch
       };
       if (sha) body.sha = sha;
+      log('正在提交到 GitHub...');
       const putRes = await fetch(apiBase, { method: 'PUT', headers, body: JSON.stringify(body) });
       if (!putRes.ok) {
         const t = await putRes.text();
@@ -157,12 +185,13 @@
       log('上传成功，提交SHA：' + result.commit.sha.slice(0, 7));
       const rawUrl = `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${path}`;
       const playUrl = `./player.html?file=${encodeURIComponent(rawUrl)}&title=${encodeURIComponent(targetName.replace(/\\.sb3$/i,''))}`;
-      log('在线演示地址：' + location.origin + location.pathname.replace(/\\/[^\\/]*$/, '/') + playUrl);
+      log('在线演示地址：' + location.origin + location.pathname.replace(/\/[^\/]*$/, '/') + playUrl);
       if (confirm('上传成功，是否立即在线演示？')) {
         location.href = playUrl;
       }
     }
-    document.getElementById('btn-upload').addEventListener('click', () => {
+    document.getElementById('btn-upload').addEventListener('click', (e) => {
+      e.preventDefault();
       upload().catch(e => {
         console.error(e);
         log(String(e));
