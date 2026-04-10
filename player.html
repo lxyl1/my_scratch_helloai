@@ -24,7 +24,12 @@
       'storage': 'https://extensions.gandi.pro/storage/index.js',
       'dolly': 'https://extensions.gandi.pro/dolly/index.js',
       'media': 'https://extensions.gandi.pro/media/index.js',
-      'camera': 'https://extensions.gandi.pro/camera/index.js'
+      'camera': 'https://extensions.gandi.pro/camera/index.js',
+      'terminal': 'https://extensions.gandi.pro/terminal/index.js',
+      'fermi': 'https://extensions.gandi.pro/fermi/index.js',
+      'sugar': 'https://extensions.gandi.pro/sugar/index.js',
+      'puremath': 'https://extensions.gandi.pro/puremath/index.js',
+      'physics': 'https://extensions.gandi.pro/physics/index.js'
     };
   </script>
 </head>
@@ -134,38 +139,43 @@
 
         const res = await fetch(fileUrl, { cache: 'no-store' });
         if (!res.ok) throw new Error('作品文件下载失败：' + res.status);
-        const buf = await res.arrayBuffer();
+        let buf = await res.arrayBuffer();
         setStatus('正在加载作品...');
 
-        // 尝试从作品文件中解析出扩展列表并预加载
+        // 核心修复逻辑：通过修改 project.json 将短 ID 扩展替换为完整 URL
         try {
           if (window.JSZip) {
             const zip = await JSZip.loadAsync(buf);
             const projectJson = JSON.parse(await zip.file('project.json').async('string'));
+            
+            let modified = false;
             if (projectJson.extensions && Array.isArray(projectJson.extensions)) {
-              for (const extId of projectJson.extensions) {
-                const url = window.EXTENSION_MAP[extId];
-                if (url) {
-                  console.log(`正在预加载扩展: ${extId} -> ${url}`);
-                  try {
-                    await scaffolding.vm.extensionManager.loadExtensionURL(url);
-                  } catch (e) {
-                    console.warn(`预加载扩展 ${extId} 失败:`, e);
-                  }
-                } else if (!extId.includes('/') && !['pen', 'music', 'videoSensing', 'text2speech', 'translate', 'makeymakey', 'microbit', 'ev3', 'boost', 'wedo2', 'gdxfor'].includes(extId)) {
-                  // 如果是一个未知的短 ID（且不是 Scratch 官方扩展），尝试从默认源加载
-                  console.log(`尝试为未知扩展加载默认路径: ${extId}`);
-                  try {
-                    await scaffolding.vm.extensionManager.loadExtensionURL(`https://extensions.gandi.pro/${extId}/index.js`);
-                  } catch (e) {
-                    console.warn(`自动尝试加载扩展 ${extId} 失败:`, e);
-                  }
+              projectJson.extensions = projectJson.extensions.map(extId => {
+                // 如果是已知映射的扩展，直接替换为 URL
+                if (window.EXTENSION_MAP[extId]) {
+                  console.log(`正在转换扩展 ID: ${extId} -> ${window.EXTENSION_MAP[extId]}`);
+                  modified = true;
+                  return window.EXTENSION_MAP[extId];
                 }
-              }
+                // 如果是未知的短 ID 且不是官方扩展，尝试自动映射到 Gandi 源
+                if (!extId.includes('/') && !['pen', 'music', 'videoSensing', 'text2speech', 'translate', 'makeymakey', 'microbit', 'ev3', 'boost', 'wedo2', 'gdxfor'].includes(extId)) {
+                  const autoUrl = `https://extensions.gandi.pro/${extId}/index.js`;
+                  console.log(`尝试自动转换未知扩展: ${extId} -> ${autoUrl}`);
+                  modified = true;
+                  return autoUrl;
+                }
+                return extId;
+              });
+            }
+
+            if (modified) {
+              zip.file('project.json', JSON.stringify(projectJson));
+              buf = await zip.generateAsync({ type: 'arraybuffer' });
+              console.log('项目文件扩展已重定向并重新打包');
             }
           }
         } catch (e) {
-          console.warn('解析扩展列表失败:', e);
+          console.warn('解析或修改作品扩展失败，尝试原始加载:', e);
         }
 
         await scaffolding.loadProject(buf);
