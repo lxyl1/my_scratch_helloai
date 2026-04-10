@@ -5,7 +5,6 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Scratch 在线演示</title>
   <link rel="stylesheet" href="./styles.css" />
-  <script src="https://cdn.jsdelivr.net/npm/@turbowarp/player@1.7.2/dist/player.js"></script>
 </head>
 <body>
   <header class="site-header">
@@ -19,7 +18,7 @@
 
   <main class="container">
     <div id="player" class="player-wrap"></div>
-    <p class="small">提示：如果加载缓慢，请耐心等待。</p>
+    <p class="small">提示：如无法加载，点击“在 TurboWarp 打开”尝试。</p>
   </main>
 
   <script>
@@ -33,18 +32,27 @@
       alert('缺少作品文件地址');
     } else {
       const container = document.getElementById('player');
-      const player = new window.TurboWarp.Player({
-        width: 640,
-        height: 480,
-        autoplay: true,
-        controls: true,
-        turbo: false,
-        microphone: false,
-        fullscreen: true,
-        loadingImage: 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="640" height="480"><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle">加载中...</text></svg>',
-        projectUrl: fileUrl
-      });
-      container.appendChild(player);
+      const iframe = document.createElement('iframe');
+      const src = `https://turbowarp.org/?project_url=${encodeURIComponent(fileUrl)}&autoplay`;
+      iframe.src = src;
+      iframe.width = '482';
+      iframe.height = '412';
+      iframe.setAttribute('allowtransparency', 'true');
+      iframe.setAttribute('frameborder', '0');
+      iframe.setAttribute('scrolling', 'no');
+      iframe.setAttribute('allowfullscreen', '');
+      iframe.style.colorScheme = 'auto';
+      iframe.style.maxWidth = '100%';
+      iframe.style.borderRadius = '6px';
+      container.appendChild(iframe);
+
+      const open = document.createElement('a');
+      open.href = src;
+      open.target = '_blank';
+      open.rel = 'noreferrer';
+      open.textContent = '在 TurboWarp 打开';
+      open.className = 'tw-open';
+      container.insertAdjacentElement('afterend', open);
     }
   </script>
 </body>

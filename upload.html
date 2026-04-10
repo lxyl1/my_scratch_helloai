@@ -61,6 +61,7 @@
   <script>
     const CONFIG_KEY = 'scratch_site_config';
     const TOKEN_KEY = 'scratch_site_token';
+    let tokenScopes = 'unknown';
     function storage() {
       try { return window.localStorage; } catch { return null; }
     }
@@ -140,8 +141,11 @@
       const token = (getToken() || document.getElementById('cfg-token').value).trim();
       return { owner, repo, branch, token };
     }
+    function encodePathSegment(segment) {
+      return encodeURIComponent(segment).replace(/[!'()*]/g, (c) => '%' + c.charCodeAt(0).toString(16).toUpperCase());
+    }
     function encodeGitHubPath(path) {
-      return path.split('/').map(encodeURIComponent).join('/');
+      return path.split('/').map(encodePathSegment).join('/');
     }
     async function readJsonSafe(res) {
       const ct = (res.headers.get('content-type') || '').toLowerCase();
@@ -168,6 +172,11 @@
         const msg = data && data.message ? data.message : 'unknown';
         throw new Error(`令牌校验失败：${meRes.status} - ${msg}（请确认 PAT 有效且未过期）`);
       }
+      const scopes = meRes.headers.get('x-oauth-scopes');
+      if (scopes) {
+        tokenScopes = scopes;
+        log(`令牌 scopes：${scopes}`);
+      }
 
       log('校验仓库访问权限...');
       const repoRes = await fetch(`https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`, { headers });
@@ -183,6 +192,14 @@
         const data = await readJsonSafe(brRes);
         const msg = data && data.message ? data.message : 'unknown';
         throw new Error(`分支不存在或不可访问：${brRes.status} - ${msg}（请确认分支名，例如 main）`);
+      }
+
+      log('校验 Contents API 权限...');
+      const contentsRes = await fetch(`https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/contents?ref=${encodeURIComponent(branch)}`, { headers });
+      if (!contentsRes.ok) {
+        const data = await readJsonSafe(contentsRes);
+        const msg = data && data.message ? data.message : 'unknown';
+        throw new Error(`Contents API 不可用：${contentsRes.status} - ${msg}（请给 PAT 开启 Contents: Read and write，并确保已授权该仓库）`);
       }
     }
     async function upload() {
@@ -206,6 +223,7 @@
       const buf = new Uint8Array(await file.arrayBuffer());
       const content = b64encode(buf);
       const apiBase = `https://api.github.com/repos/${owner}/${repo}/contents/${encodeGitHubPath(path)}`;
+      log(`请求地址：/repos/${owner}/${repo}/contents/${path}`);
       const headers = {
         'Accept': 'application/vnd.github+json',
         'Authorization': `Bearer ${token}`
@@ -234,12 +252,15 @@
       if (!putRes.ok) {
         const data = await readJsonSafe(putRes);
         const msg = data && data.message ? data.message : 'unknown';
+        if (putRes.status === 404) {
+          throw new Error(`上传失败：404 - Not Found（通常是 PAT 没有 Contents 写权限，或 Fine-grained token 未授权该仓库/未开 Contents: Read and write；当前令牌 scopes=${tokenScopes}）`);
+        }
         throw new Error(`上传失败：${putRes.status} - ${msg}`);
       }
       const result = await putRes.json();
       log('上传成功，提交SHA：' + result.commit.sha.slice(0, 7));
-      const rawUrl = `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${path}`;
-      const playUrl = `./player.html?file=${encodeURIComponent(rawUrl)}&title=${encodeURIComponent(targetName.replace(/\\.sb3$/i,''))}`;
+      const fileUrl = new URL(path, location.href).href;
+      const playUrl = `./player.html?file=${encodeURIComponent(fileUrl)}&title=${encodeURIComponent(targetName.replace(/\\.sb3$/i,''))}`;
       log('在线演示地址：' + location.origin + location.pathname.replace(/\/[^\/]*$/, '/') + playUrl);
       if (confirm('上传成功，是否立即在线演示？')) {
         location.href = playUrl;
