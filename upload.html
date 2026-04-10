@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>上传 Scratch 作品</title>
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <header class="site-header">
+    <div class="container">
+      <h1 class="site-title">上传 Scratch 作品</h1>
+      <nav class="actions">
+        <a href="./index.html">返回列表</a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="container">
+    <section class="panel">
+      <h3>仓库配置</h3>
+      <div class="grid-2">
+        <label>GitHub 用户/组织
+          <input id="cfg-owner" placeholder="owner，例如: yourname" />
+        </label>
+        <label>仓库名
+          <input id="cfg-repo" placeholder="repo，例如: scratch-site" />
+        </label>
+        <label>分支
+          <input id="cfg-branch" placeholder="main 或 gh-pages" value="main" />
+        </label>
+        <label>个人访问令牌 PAT
+          <input id="cfg-token" type="password" placeholder="仅保存在你浏览器本地" />
+        </label>
+      </div>
+      <p class="small">提示：令牌至少需要 <b>contents:write</b> 权限。令牌仅保存在本地浏览器的 localStorage，不会上传到服务器。</p>
+      <div class="inline-actions">
+        <button id="btn-save">保存到本地</button>
+        <button id="btn-clear">清除本地配置</button>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h3>选择 .sb3 文件上传</h3>
+      <div class="grid-2">
+        <label>作品文件
+          <input id="file" type="file" accept=".sb3" />
+        </label>
+        <label>目标文件名（可选）
+          <input id="filename" placeholder="默认使用所选文件名" />
+        </label>
+      </div>
+      <div class="inline-actions">
+        <button id="btn-upload" class="primary">开始上传</button>
+      </div>
+      <pre id="log" class="log"></pre>
+    </section>
+  </main>
+
+  <script>
+    const CONFIG_KEY = 'scratch_site_config';
+    const TOKEN_KEY = 'scratch_site_token';
+    function getConfig() {
+      try { return JSON.parse(localStorage.getItem(CONFIG_KEY) || '{}'); } catch { return {}; }
+    }
+    function saveConfig(cfg) {
+      localStorage.setItem(CONFIG_KEY, JSON.stringify(cfg));
+    }
+    function saveToken(token) {
+      if (token) localStorage.setItem(TOKEN_KEY, token);
+    }
+    function getToken() {
+      return localStorage.getItem(TOKEN_KEY) || '';
+    }
+    function bindConfig() {
+      const cfg = getConfig();
+      document.getElementById('cfg-owner').value = cfg.owner || '';
+      document.getElementById('cfg-repo').value = cfg.repo || '';
+      document.getElementById('cfg-branch').value = cfg.branch || 'main';
+      document.getElementById('cfg-token').value = getToken();
+      document.getElementById('btn-save').addEventListener('click', () => {
+        const owner = document.getElementById('cfg-owner').value.trim();
+        const repo = document.getElementById('cfg-repo').value.trim();
+        const branch = document.getElementById('cfg-branch').value.trim() || 'main';
+        const token = document.getElementById('cfg-token').value.trim();
+        if (!owner || !repo || !token) {
+          alert('请填写 owner / repo / token');
+          return;
+        }
+        saveConfig({ owner, repo, branch });
+        saveToken(token);
+        alert('已保存本地配置');
+      });
+      document.getElementById('btn-clear').addEventListener('click', () => {
+        localStorage.removeItem(CONFIG_KEY);
+        localStorage.removeItem(TOKEN_KEY);
+        alert('已清除');
+        location.reload();
+      });
+    }
+    function b64encode(uint8) {
+      let binary = '';
+      const chunk = 0x8000;
+      for (let i = 0; i < uint8.length; i += chunk) {
+        binary += String.fromCharCode.apply(null, uint8.subarray(i, i + chunk));
+      }
+      return btoa(binary);
+    }
+    function log(msg) {
+      const el = document.getElementById('log');
+      el.textContent += msg + '\\n';
+      el.scrollTop = el.scrollHeight;
+    }
+    async function upload() {
+      const { owner, repo, branch } = getConfig();
+      const token = getToken();
+      const file = document.getElementById('file').files[0];
+      if (!owner || !repo || !token) {
+        alert('请先保存仓库配置和令牌');
+        return;
+      }
+      if (!file) {
+        alert('请选择 .sb3 文件');
+        return;
+      }
+      const targetName = (document.getElementById('filename').value.trim() || file.name).replace(/\\s+/g, '_');
+      const path = `projects/${targetName}`;
+      log(`准备上传到 ${owner}/${repo}@${branch}:${path}`);
+      const buf = new Uint8Array(await file.arrayBuffer());
+      const content = b64encode(buf);
+      const apiBase = `https://api.github.com/repos/${owner}/${repo}/contents/${encodeURIComponent(path)}`;
+      const headers = {
+        'Accept': 'application/vnd.github+json',
+        'Authorization': `Bearer ${token}`
+      };
+      let sha = '';
+      const getRes = await fetch(`${apiBase}?ref=${encodeURIComponent(branch)}`, { headers });
+      if (getRes.ok) {
+        const data = await getRes.json();
+        sha = data.sha || '';
+        log('检测到同名文件，执行覆盖提交');
+      } else {
+        log('未检测到同名文件，执行新增提交');
+      }
+      const body = {
+        message: (sha ? 'Update' : 'Add') + ` Scratch project ${targetName}`,
+        content,
+        branch
+      };
+      if (sha) body.sha = sha;
+      const putRes = await fetch(apiBase, { method: 'PUT', headers, body: JSON.stringify(body) });
+      if (!putRes.ok) {
+        const t = await putRes.text();
+        throw new Error('上传失败：' + putRes.status + ' ' + t);
+      }
+      const result = await putRes.json();
+      log('上传成功，提交SHA：' + result.commit.sha.slice(0, 7));
+      const rawUrl = `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${path}`;
+      const playUrl = `./player.html?file=${encodeURIComponent(rawUrl)}&title=${encodeURIComponent(targetName.replace(/\\.sb3$/i,''))}`;
+      log('在线演示地址：' + location.origin + location.pathname.replace(/\\/[^\\/]*$/, '/') + playUrl);
+      if (confirm('上传成功，是否立即在线演示？')) {
+        location.href = playUrl;
+      }
+    }
+    document.getElementById('btn-upload').addEventListener('click', () => {
+      upload().catch(e => {
+        console.error(e);
+        log(String(e));
+        alert('上传出错：' + e.message);
+      });
+    });
+    bindConfig();
+  </script>
+</body>
+</html>

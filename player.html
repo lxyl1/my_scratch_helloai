@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Scratch 在线演示</title>
+  <link rel="stylesheet" href="./styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/@turbowarp/player@1.7.2/dist/player.js"></script>
+</head>
+<body>
+  <header class="site-header">
+    <div class="container">
+      <h1 class="site-title" id="project-title">Scratch 在线演示</h1>
+      <nav class="actions">
+        <a href="./index.html">返回列表</a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="container">
+    <div id="player" class="player-wrap"></div>
+    <p class="small">提示：如果加载缓慢，请耐心等待。你也可以在上传页开启“压缩上传”。</p>
+  </main>
+
+  <script>
+    function qs(name) {
+      return new URLSearchParams(location.search).get(name) || '';
+    }
+    const fileUrl = qs('file');
+    const title = qs('title') || 'Scratch 在线演示';
+    document.getElementById('project-title').textContent = title;
+    if (!fileUrl) {
+      alert('缺少作品文件地址');
+    } else {
+      const container = document.getElementById('player');
+      const player = new window.TurboWarp.Player({
+        width: 640,
+        height: 480,
+        autoplay: true,
+        controls: true,
+        turbo: false,
+        microphone: false,
+        fullscreen: true,
+        loadingImage: 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="640" height="480"><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle">加载中...</text></svg>',
+        projectUrl: fileUrl
+      });
+      container.appendChild(player);
+    }
+  </script>
+</body>
+</html>
+

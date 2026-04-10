@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>我的 Scratch 作品库</title>
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <header class="site-header">
+    <div class="container">
+      <h1 class="site-title">我的 Scratch 作品库</h1>
+      <nav class="actions">
+        <button id="btn-refresh">刷新列表</button>
+        <a class="primary" href="./upload.html">上传作品</a>
+        <button id="btn-settings" title="站点设置">设置</button>
+      </nav>
+    </div>
+  </header>
+
+  <main class="container">
+    <section id="empty-hint" class="hint" hidden>未找到任何 .sb3 文件。点击右上角“上传作品”添加你的第一个作品。</section>
+    <section id="cards" class="grid"></section>
+  </main>
+
+  <dialog id="settings-dialog">
+    <form method="dialog" class="dialog-form">
+      <h3>站点设置</h3>
+      <label>GitHub 用户/组织
+        <input id="cfg-owner" placeholder="owner，例如: yourname" required />
+      </label>
+      <label>仓库名
+        <input id="cfg-repo" placeholder="repo，例如: scratch-site" required />
+      </label>
+      <label>分支
+        <input id="cfg-branch" placeholder="main 或 gh-pages" value="main" required />
+      </label>
+      <p class="small">提示：程序会从该仓库的 /projects 目录实时读取 .sb3 文件并展示。</p>
+      <menu>
+        <button value="cancel">取消</button>
+        <button id="save-settings" value="default" class="primary">保存</button>
+      </menu>
+    </form>
+  </dialog>
+
+  <template id="card-tpl">
+    <article class="card">
+      <div class="thumb">SB3</div>
+      <div class="meta">
+        <h4 class="title"></h4>
+        <p class="sub"></p>
+      </div>
+      <div class="card-actions">
+        <a class="play" target="_self">在线演示</a>
+        <a class="download" target="_blank">下载</a>
+      </div>
+    </article>
+  </template>
+
+  <script>
+    const CONFIG_KEY = 'scratch_site_config';
+    function getConfig() {
+      const raw = localStorage.getItem(CONFIG_KEY);
+      if (raw) {
+        try { return JSON.parse(raw); } catch (_) {}
+      }
+      return { owner: '', repo: '', branch: 'main' };
+    }
+    function saveConfig(cfg) {
+      localStorage.setItem(CONFIG_KEY, JSON.stringify(cfg));
+    }
+    function ensureConfig() {
+      const cfg = getConfig();
+      if (!cfg.owner || !cfg.repo) {
+        document.getElementById('settings-dialog').showModal();
+      }
+      return cfg;
+    }
+    function bindSettingsDialog() {
+      const dlg = document.getElementById('settings-dialog');
+      const btn = document.getElementById('btn-settings');
+      const save = document.getElementById('save-settings');
+      btn.addEventListener('click', () => {
+        const cfg = getConfig();
+        document.getElementById('cfg-owner').value = cfg.owner || '';
+        document.getElementById('cfg-repo').value = cfg.repo || '';
+        document.getElementById('cfg-branch').value = cfg.branch || 'main';
+        dlg.showModal();
+      });
+      save.addEventListener('click', (e) => {
+        const owner = document.getElementById('cfg-owner').value.trim();
+        const repo = document.getElementById('cfg-repo').value.trim();
+        const branch = document.getElementById('cfg-branch').value.trim() || 'main';
+        if (!owner || !repo) {
+          e.preventDefault();
+          return;
+        }
+        saveConfig({ owner, repo, branch });
+      });
+    }
+    function toRawUrl({ owner, repo, branch, path }) {
+      return `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${path}`;
+    }
+    async function fetchProjects(cfg) {
+      const api = `https://api.github.com/repos/${cfg.owner}/${cfg.repo}/contents/projects?ref=${encodeURIComponent(cfg.branch)}`;
+      const res = await fetch(api, { headers: { 'Accept': 'application/vnd.github+json' } });
+      if (res.status === 404) return [];
+      if (!res.ok) throw new Error('GitHub API 返回异常: ' + res.status);
+      const items = await res.json();
+      return items.filter(it => /\.sb3$/i.test(it.name));
+    }
+    function renderList(items, cfg) {
+      const container = document.getElementById('cards');
+      container.innerHTML = '';
+      if (!items.length) {
+        document.getElementById('empty-hint').hidden = false;
+        return;
+      }
+      document.getElementById('empty-hint').hidden = true;
+      const tpl = document.getElementById('card-tpl');
+      items.forEach(it => {
+        const node = tpl.content.cloneNode(true);
+        node.querySelector('.title').textContent = it.name.replace(/\.sb3$/i, '');
+        const sizeMB = (it.size / (1024 * 1024)).toFixed(2);
+        node.querySelector('.sub').textContent = `大小 ${sizeMB} MB`;
+        const fileUrl = toRawUrl({ owner: cfg.owner, repo: cfg.repo, branch: cfg.branch, path: `projects/${it.name}` });
+        node.querySelector('.play').href = `./player.html?file=${encodeURIComponent(fileUrl)}&title=${encodeURIComponent(it.name.replace(/\\.sb3$/i,''))}`;
+        node.querySelector('.download').href = fileUrl;
+        container.appendChild(node);
+      });
+    }
+    async function load() {
+      const cfg = ensureConfig();
+      try {
+        const items = await fetchProjects(cfg);
+        renderList(items, cfg);
+      } catch (err) {
+        console.error(err);
+        alert('加载列表失败：' + err.message);
+      }
+    }
+    document.getElementById('btn-refresh').addEventListener('click', load);
+    bindSettingsDialog();
+    load();
+  </script>
+</body>
+</html>
+
