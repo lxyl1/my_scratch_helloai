@@ -187,7 +187,7 @@
           path: it.path || it.name
         });
         
-        node.querySelector('.play').href = `./player.html?file=${encodeURIComponent(fileUrl)}&title=${encodeURIComponent(it.name.replace(/\.sb3$/i, ''))}`;
+        node.querySelector('.play').href = `./player_v2.html?file=${encodeURIComponent(fileUrl)}&title=${encodeURIComponent(it.name.replace(/\.sb3$/i, ''))}`;
         node.querySelector('.download').href = fileUrl;
         container.appendChild(node);
       });
