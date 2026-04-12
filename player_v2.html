@@ -10,6 +10,14 @@
     .player-toolbar button{padding:8px 12px;border:1px solid #d0d7de;background:#fff;border-radius:6px;cursor:pointer}
     .player-toolbar button.primary{background:#0969da;color:#fff;border-color:#0969da}
     .scaffolding-host{width:100%;height:min(72vh,520px);min-height:412px}
+    /* 外部播放器容器样式 */
+    .external-player-container {
+      width: 100%;
+      height: min(72vh, 520px);
+      border: none;
+      border-radius: 8px;
+      background: #000;
+    }
   </style>
   <script src="https://unpkg.com/@turbowarp/scaffolding@0.3.0/dist/scaffolding-min.js"></script>
   <script src="https://unpkg.com/jszip/dist/jszip.min.js"></script>
@@ -48,14 +56,15 @@
       <button id="btn-load" class="primary" type="button">加载作品</button>
       <button id="btn-flag" type="button" disabled>绿旗</button>
       <button id="btn-stop" type="button" disabled>停止</button>
+      <button id="btn-external" type="button" style="background:#4caf50;color:#fff;border-color:#4caf50">使用 Gandi 播放器 (备选)</button>
       <span id="status" class="small"></span>
     </div>
     <div id="player" class="player-wrap scaffolding-host"></div>
-    <p class="small">提示：首次加载需要下载作品文件和素材，加载完成后点击“绿旗”开始运行。</p>
+    <p class="small">提示：如果默认播放器因扩展问题加载失败，请点击“使用 Gandi 播放器”进行演示。</p>
   </main>
 
   <script>
-    console.log('Player version: 2026-04-12-v8');
+    console.log('Player version: 2026-04-12-v9-Final');
     // 拦截脚本和 fetch 逻辑...
     const originalFetch = window.fetch;
     window.fetch = function(url, options) {
@@ -94,15 +103,30 @@
     const btnLoad = document.getElementById('btn-load');
     const btnFlag = document.getElementById('btn-flag');
     const btnStop = document.getElementById('btn-stop');
+    const btnExternal = document.getElementById('btn-external');
 
     // 错误日志辅助
     window.onerror = function(msg, url, lineNo, columnNo, error) {
       console.error('全局错误:', msg, error);
+      if (msg.includes('Unknown extension')) {
+        setStatus('检测到扩展兼容性问题，建议使用外部 Gandi 播放器');
+      }
       return false;
     };
-    window.onunhandledrejection = function(event) {
-      console.error('未处理的 Promise 拒绝:', event.reason);
-    };
+
+    btnExternal.addEventListener('click', () => {
+      if (!fileUrl) return;
+      // 提取 SB3 文件名或 ID
+      const fileName = fileUrl.split('/').pop().replace('.sb3', '');
+      // 使用 Gandi 官方的嵌入播放器接口
+      const gandiPlayerUrl = `https://cocrea.world/embed/${fileName}?autoplay=true`;
+      
+      container.innerHTML = `<iframe class="external-player-container" src="${gandiPlayerUrl}" allowtransparency="true" allowfullscreen="true" allow="geolocation; microphone; camera"></iframe>`;
+      setStatus('已切换至 Gandi 官方播放器');
+      btnLoad.disabled = true;
+      btnFlag.disabled = true;
+      btnStop.disabled = true;
+    });
 
     function setStatus(text) {
       statusEl.textContent = text || '';
