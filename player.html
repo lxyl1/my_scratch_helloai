@@ -16,20 +16,20 @@
   <script>
     // 扩展映射表，针对常见的第三方扩展（如 Gandi IDE 的扩展）提供支持
     window.EXTENSION_MAP = {
-      'image': 'https://extensions.gandi.pro/image/index.js',
-      'canvas': 'https://extensions.gandi.pro/canvas/index.js',
-      'ai': 'https://extensions.gandi.pro/ai/index.js',
-      'widget': 'https://extensions.gandi.pro/widget/index.js',
-      'json': 'https://extensions.gandi.pro/json/index.js',
-      'storage': 'https://extensions.gandi.pro/storage/index.js',
-      'dolly': 'https://extensions.gandi.pro/dolly/index.js',
-      'media': 'https://extensions.gandi.pro/media/index.js',
-      'camera': 'https://extensions.gandi.pro/camera/index.js',
-      'terminal': 'https://extensions.gandi.pro/terminal/index.js',
-      'fermi': 'https://extensions.gandi.pro/fermi/index.js',
-      'sugar': 'https://extensions.gandi.pro/sugar/index.js',
-      'puremath': 'https://extensions.gandi.pro/puremath/index.js',
-      'physics': 'https://extensions.gandi.pro/physics/index.js'
+      'image': 'https://extensions.gandi.pro/extensions/image/index.js',
+      'canvas': 'https://extensions.gandi.pro/extensions/canvas/index.js',
+      'ai': 'https://extensions.gandi.pro/extensions/ai/index.js',
+      'widget': 'https://extensions.gandi.pro/extensions/widget/index.js',
+      'json': 'https://extensions.gandi.pro/extensions/json/index.js',
+      'storage': 'https://extensions.gandi.pro/extensions/storage/index.js',
+      'dolly': 'https://extensions.gandi.pro/extensions/dolly/index.js',
+      'media': 'https://extensions.gandi.pro/extensions/media/index.js',
+      'camera': 'https://extensions.gandi.pro/extensions/camera/index.js',
+      'terminal': 'https://extensions.gandi.pro/extensions/terminal/index.js',
+      'fermi': 'https://extensions.gandi.pro/extensions/fermi/index.js',
+      'sugar': 'https://extensions.gandi.pro/extensions/sugar/index.js',
+      'puremath': 'https://extensions.gandi.pro/extensions/puremath/index.js',
+      'physics': 'https://extensions.gandi.pro/extensions/physics/index.js'
     };
   </script>
 </head>
@@ -113,25 +113,34 @@
 
         // 监听 VM 扩展请求，自动从映射表加载第三方扩展
         if (scaffolding.vm && scaffolding.vm.extensionManager) {
-          // 允许非沙盒扩展
-          scaffolding.vm.setTurbo(true);
+          // 尝试开启加速模式 (如果支持)
+          if (typeof scaffolding.vm.setTurboMode === 'function') {
+            scaffolding.vm.setTurboMode(true);
+          }
           
-          const originalLoad = scaffolding.vm.extensionManager.loadExtensionURL;
-          scaffolding.vm.extensionManager.loadExtensionURL = function(id, ...args) {
+          const extensionManager = scaffolding.vm.extensionManager;
+          const originalLoad = extensionManager.loadExtensionURL;
+          
+          extensionManager.loadExtensionURL = function(id, ...args) {
             // 如果 ID 在映射表中，或者 ID 看起来像一个缩写 ID，尝试映射到完整 URL
-            const url = window.EXTENSION_MAP[id] || id;
-            console.log(`正在请求扩展: ${id} -> ${url}`);
+            let url = window.EXTENSION_MAP[id] || id;
             
-            // 如果 url 仍然不是完整链接且不在官方库中，可能会导致 Unknown extension 错误
-            // 这里我们强制返回一个 Promise 以防止崩溃
+            // 如果 ID 是 image，且映射失败，尝试默认路径
+            if (id === 'image' && !url.startsWith('http')) {
+              url = 'https://extensions.gandi.pro/extensions/image/index.js';
+            }
+            
+            console.log(`VM 请求扩展: ${id} -> ${url}`);
+            
+            // 确保加载成功或静默失败
             try {
               return originalLoad.call(this, url, ...args).catch(err => {
                 console.warn(`扩展加载失败 (${id}):`, err);
-                // 返回一个虚拟扩展以防止 UI 崩溃
+                // 这里我们返回一个空的 resolve，防止 VM 抛出异常中断加载
                 return Promise.resolve();
               });
             } catch (e) {
-              console.error(`扩展加载异常 (${id}):`, e);
+              console.error(`扩展加载运行时异常 (${id}):`, e);
               return Promise.resolve();
             }
           };
@@ -159,7 +168,8 @@
                 }
                 // 如果是未知的短 ID 且不是官方扩展，尝试自动映射到 Gandi 源
                 if (!extId.includes('/') && !['pen', 'music', 'videoSensing', 'text2speech', 'translate', 'makeymakey', 'microbit', 'ev3', 'boost', 'wedo2', 'gdxfor'].includes(extId)) {
-                  const autoUrl = `https://extensions.gandi.pro/${extId}/index.js`;
+                  // 尝试两种可能的 Gandi 路径
+                  const autoUrl = window.EXTENSION_MAP[extId] || `https://extensions.gandi.pro/extensions/${extId}/index.js`;
                   console.log(`尝试自动转换未知扩展: ${extId} -> ${autoUrl}`);
                   modified = true;
                   return autoUrl;
@@ -172,6 +182,18 @@
               zip.file('project.json', JSON.stringify(projectJson));
               buf = await zip.generateAsync({ type: 'arraybuffer' });
               console.log('项目文件扩展已重定向并重新打包');
+              
+              // 在正式 loadProject 之前，手动预加载一遍所有扩展 URL
+              for (const url of projectJson.extensions) {
+                if (url.startsWith('http')) {
+                  console.log(`预加载扩展 URL: ${url}`);
+                  try {
+                    await extensionManager.loadExtensionURL(url);
+                  } catch (e) {
+                    console.warn(`预加载扩展失败: ${url}`, e);
+                  }
+                }
+              }
             }
           }
         } catch (e) {
