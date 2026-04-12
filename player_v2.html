@@ -64,7 +64,7 @@
   </main>
 
   <script>
-    console.log('Player version: 2026-04-12-v9-Final');
+    console.log('Player version: 2026-04-12-v10-SafeLoad');
     // 拦截脚本和 fetch 逻辑...
     const originalFetch = window.fetch;
     window.fetch = function(url, options) {
@@ -91,6 +91,21 @@
       }
       return el;
     };
+    
+    // 强力拦截所有错误，特别是 extensionManager 的报错
+    window.addEventListener('error', function(event) {
+      if (event.message && event.message.includes('Unknown extension')) {
+        console.warn('捕获到 Unknown extension 错误，尝试静默处理');
+        event.preventDefault();
+      }
+    }, true);
+    
+    window.addEventListener('unhandledrejection', function(event) {
+      if (event.reason && event.reason.message && event.reason.message.includes('Unknown extension')) {
+        console.warn('捕获到未处理的 extension 拒绝，尝试静默处理');
+        event.preventDefault();
+      }
+    }, true);
     function qs(name) {
       return new URLSearchParams(location.search).get(name) || '';
     }
@@ -178,12 +193,24 @@
           }
           console.log(`[ExtensionManager] 正在加载: ${id} -> ${url}`);
           
-          return originalLoad.call(this, url, ...args).catch(err => {
-            console.warn(`[ExtensionManager] 无法加载 ${id}，注入空扩展防止崩溃:`, err);
+          // 在内部也尝试捕获
+          try {
+            const result = originalLoad.call(this, url, ...args);
+            if (result && result.catch) {
+              return result.catch(err => {
+                console.warn(`[ExtensionManager] 内部捕获加载失败 ${id}:`, err);
+                return Promise.resolve({
+                  getInfo: () => ({ id, blocks: [] })
+                });
+              });
+            }
+            return result;
+          } catch (e) {
+            console.warn(`[ExtensionManager] 同步捕获加载失败 ${id}:`, e);
             return Promise.resolve({
               getInfo: () => ({ id, blocks: [] })
             });
-          });
+          }
         };
 
         const res = await fetch(fileUrl, { cache: 'no-store' });
