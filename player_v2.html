@@ -56,11 +56,11 @@
       <button id="btn-load" class="primary" type="button">加载作品</button>
       <button id="btn-flag" type="button" disabled>绿旗</button>
       <button id="btn-stop" type="button" disabled>停止</button>
-      <button id="btn-external" type="button" style="background:#4caf50;color:#fff;border-color:#4caf50">使用 Gandi 播放器 (备选)</button>
+      <button id="btn-external" type="button" style="background:#4caf50;color:#fff;border-color:#4caf50">使用增强播放器 (支持扩展)</button>
       <span id="status" class="small"></span>
     </div>
     <div id="player" class="player-wrap scaffolding-host"></div>
-    <p class="small">提示：如果默认播放器因扩展问题加载失败，请点击“使用 Gandi 播放器”进行演示。</p>
+    <p class="small">提示：如果默认播放器提示“Unknown extension: image”，请点击“使用增强播放器”按钮。</p>
   </main>
 
   <script>
@@ -131,13 +131,13 @@
 
     btnExternal.addEventListener('click', () => {
       if (!fileUrl) return;
-      // 提取 SB3 文件名或 ID
-      const fileName = fileUrl.split('/').pop().replace('.sb3', '');
-      // 使用 Gandi 官方的嵌入播放器接口
-      const gandiPlayerUrl = `https://cocrea.world/embed/${fileName}?autoplay=true`;
+      // 使用 TurboWarp 嵌入式播放器作为备选，它对扩展的支持更强
+      // 同时通过 extension 参数显式传入 image 扩展的加载地址
+      const extensionUrl = 'https://extensions.gandi.pro/extensions/image/index.js';
+      const twPlayerUrl = `https://turbowarp.org/embed.html?project_url=${encodeURIComponent(fileUrl)}&extension=${encodeURIComponent(extensionUrl)}`;
       
-      container.innerHTML = `<iframe class="external-player-container" src="${gandiPlayerUrl}" allowtransparency="true" allowfullscreen="true" allow="geolocation; microphone; camera"></iframe>`;
-      setStatus('已切换至 Gandi 官方播放器');
+      container.innerHTML = `<iframe class="external-player-container" src="${twPlayerUrl}" allowtransparency="true" allowfullscreen="true" allow="geolocation; microphone; camera"></iframe>`;
+      setStatus('已切换至 TurboWarp 增强播放器 (支持 Gandi 扩展)');
       btnLoad.disabled = true;
       btnFlag.disabled = true;
       btnStop.disabled = true;
