@@ -55,8 +55,8 @@
   </main>
 
   <script>
-    console.log('Player version: 2026-04-12-v5');
-    // 强制全局拦截所有 fetch 请求，尝试修复某些动态加载的资源
+    console.log('Player version: 2026-04-12-v8');
+    // 拦截脚本和 fetch 逻辑...
     const originalFetch = window.fetch;
     window.fetch = function(url, options) {
       if (typeof url === 'string' && url.includes('extensions.gandi.pro') && !url.includes('/extensions/')) {
@@ -65,6 +65,22 @@
         return originalFetch(newUrl, options);
       }
       return originalFetch(url, options);
+    };
+
+    const originalCreateElement = document.createElement;
+    document.createElement = function(tagName) {
+      const el = originalCreateElement.apply(this, arguments);
+      if (tagName.toLowerCase() === 'script') {
+        const originalSetAttribute = el.setAttribute;
+        el.setAttribute = function(name, value) {
+          if (name === 'src' && typeof value === 'string' && value.includes('extensions.gandi.pro') && !value.includes('/extensions/')) {
+            value = value.replace('extensions.gandi.pro/', 'extensions.gandi.pro/extensions/');
+            console.log(`Script 拦截重定向: ${value}`);
+          }
+          return originalSetAttribute.apply(this, arguments);
+        };
+      }
+      return el;
     };
     function qs(name) {
       return new URLSearchParams(location.search).get(name) || '';
@@ -122,95 +138,51 @@
         scaffolding.setup();
         scaffolding.appendTo(container);
 
-        // 监听 VM 扩展请求，自动从映射表加载第三方扩展
-        if (scaffolding.vm && scaffolding.vm.extensionManager) {
-          // 尝试开启加速模式 (如果支持)
-          if (typeof scaffolding.vm.setTurboMode === 'function') {
-            scaffolding.vm.setTurboMode(true);
-          }
-          
-          const extensionManager = scaffolding.vm.extensionManager;
-          const originalLoad = extensionManager.loadExtensionURL;
-          
-          extensionManager.loadExtensionURL = function(id, ...args) {
-            // 如果 ID 在映射表中，或者 ID 看起来像一个缩写 ID，尝试映射到完整 URL
-            let url = window.EXTENSION_MAP[id] || id;
-            
-            // 兜底策略：如果 id 是常见的 Gandi 扩展名且 url 不是完整的 http 链接
-            const gandiExtensions = ['image', 'canvas', 'ai', 'widget', 'json', 'storage', 'dolly', 'media', 'camera', 'terminal', 'fermi', 'sugar', 'puremath', 'physics'];
-            if (gandiExtensions.includes(id) && !url.startsWith('http')) {
-              url = `https://extensions.gandi.pro/extensions/${id}/index.js`;
-            }
-            
-            console.log(`VM 请求加载扩展: ${id} -> ${url}`);
-            
-            // 强制忽略 Unknown extension 报错并尝试加载
-            try {
-              return originalLoad.call(this, url, ...args).catch(err => {
-                console.warn(`扩展 ${id} 加载失败，但我们将尝试让 VM 继续运行:`, err);
-                // 解决 "Unknown extension" 的关键：如果失败，返回一个空的对象而不是拒绝
-                // 这能骗过 VM 的 extensionManager，让它认为扩展已经加载（虽然功能为空）
-                return Promise.resolve({
-                  getInfo: () => ({ id, blocks: [] })
-                });
-              });
-            } catch (e) {
-              console.error(`扩展加载运行时错误 (${id}):`, e);
-              return Promise.resolve();
-            }
-          };
+        const extensionManager = scaffolding.vm.extensionManager;
+        
+        // 核心修复：手动将 image 映射到 Gandi URL
+        if (scaffolding.addExtension) {
+          scaffolding.addExtension('https://extensions.gandi.pro/extensions/image/index.js');
         }
+
+        // 强力拦截所有 loadExtensionURL 调用
+        const originalLoad = extensionManager.loadExtensionURL;
+        extensionManager.loadExtensionURL = function(id, ...args) {
+          let url = window.EXTENSION_MAP[id] || id;
+          if (id === 'image' && !url.startsWith('http')) {
+            url = 'https://extensions.gandi.pro/extensions/image/index.js';
+          }
+          console.log(`[ExtensionManager] 正在加载: ${id} -> ${url}`);
+          
+          return originalLoad.call(this, url, ...args).catch(err => {
+            console.warn(`[ExtensionManager] 无法加载 ${id}，注入空扩展防止崩溃:`, err);
+            return Promise.resolve({
+              getInfo: () => ({ id, blocks: [] })
+            });
+          });
+        };
 
         const res = await fetch(fileUrl, { cache: 'no-store' });
         if (!res.ok) throw new Error('作品文件下载失败：' + res.status);
         let buf = await res.arrayBuffer();
         setStatus('正在加载作品...');
 
-        // 核心修复逻辑：通过修改 project.json 将短 ID 扩展替换为完整 URL
+        // 核心修复逻辑：通过暴力字符串替换 project.json 中的 ID
         try {
           if (window.JSZip) {
             const zip = await JSZip.loadAsync(buf);
-            const projectJson = JSON.parse(await zip.file('project.json').async('string'));
-            console.log('原始项目扩展列表:', projectJson.extensions);
+            let jsonStr = await zip.file('project.json').async('string');
             
-            let modified = false;
-            if (projectJson.extensions && Array.isArray(projectJson.extensions)) {
-              projectJson.extensions = projectJson.extensions.map(extId => {
-                // 如果是已知映射的扩展，直接替换为 URL
-                if (window.EXTENSION_MAP[extId]) {
-                  console.log(`转换已知扩展 ID: ${extId} -> ${window.EXTENSION_MAP[extId]}`);
-                  modified = true;
-                  return window.EXTENSION_MAP[extId];
-                }
-                // 如果是未知的短 ID 且不是官方扩展，尝试自动映射到 Gandi 源
-                if (!extId.includes('/') && !['pen', 'music', 'videoSensing', 'text2speech', 'translate', 'makeymakey', 'microbit', 'ev3', 'boost', 'wedo2', 'gdxfor'].includes(extId)) {
-                  // 尝试 Gandi 路径
-                  const autoUrl = `https://extensions.gandi.pro/extensions/${extId}/index.js`;
-                  console.log(`自动映射未知扩展: ${extId} -> ${autoUrl}`);
-                  modified = true;
-                  return autoUrl;
-                }
-                return extId;
-              });
-            }
-
-            if (modified) {
-              console.log('修改后的项目扩展列表:', projectJson.extensions);
-              zip.file('project.json', JSON.stringify(projectJson));
-              buf = await zip.generateAsync({ type: 'arraybuffer' });
-              console.log('项目文件扩展已重定向并重新打包');
+            // 暴力替换："image" -> 完整 URL，这样无论它在 extensions 数组还是 extensionURLs 映射中都会被修正
+            const targetUrl = 'https://extensions.gandi.pro/extensions/image/index.js';
+            if (jsonStr.includes('"image"')) {
+              console.log('检测到 "image" ID，执行暴力替换为 URL');
+              // 替换 extensions 数组中的 ID 和可能存在的其他引用
+              jsonStr = jsonStr.replace(/"image"/g, `"${targetUrl}"`);
               
-              // 在正式 loadProject 之前，手动预加载一遍所有扩展 URL
-              for (const url of projectJson.extensions) {
-                if (url.startsWith('http')) {
-                  console.log(`预加载扩展 URL: ${url}`);
-                  try {
-                    await extensionManager.loadExtensionURL(url);
-                  } catch (e) {
-                    console.warn(`预加载扩展失败: ${url}`, e);
-                  }
-                }
-              }
+              zip.file('project.json', jsonStr);
+              buf = await zip.generateAsync({ type: 'arraybuffer' });
+              console.log('项目文件 project.json 已完成暴力重定向并重新打包');
             }
           }
         } catch (e) {
