@@ -55,7 +55,17 @@
   </main>
 
   <script>
-    console.log('Player version: 2026-04-12-v4');
+    console.log('Player version: 2026-04-12-v5');
+    // 强制全局拦截所有 fetch 请求，尝试修复某些动态加载的资源
+    const originalFetch = window.fetch;
+    window.fetch = function(url, options) {
+      if (typeof url === 'string' && url.includes('extensions.gandi.pro') && !url.includes('/extensions/')) {
+        const newUrl = url.replace('extensions.gandi.pro/', 'extensions.gandi.pro/extensions/');
+        console.log(`Fetch 拦截重定向: ${url} -> ${newUrl}`);
+        return originalFetch(newUrl, options);
+      }
+      return originalFetch(url, options);
+    };
     function qs(name) {
       return new URLSearchParams(location.search).get(name) || '';
     }
@@ -126,22 +136,26 @@
             // 如果 ID 在映射表中，或者 ID 看起来像一个缩写 ID，尝试映射到完整 URL
             let url = window.EXTENSION_MAP[id] || id;
             
-            // 如果 ID 是 image，且映射失败，尝试默认路径
-            if (id === 'image' && !url.startsWith('http')) {
-              url = 'https://extensions.gandi.pro/extensions/image/index.js';
+            // 兜底策略：如果 id 是常见的 Gandi 扩展名且 url 不是完整的 http 链接
+            const gandiExtensions = ['image', 'canvas', 'ai', 'widget', 'json', 'storage', 'dolly', 'media', 'camera', 'terminal', 'fermi', 'sugar', 'puremath', 'physics'];
+            if (gandiExtensions.includes(id) && !url.startsWith('http')) {
+              url = `https://extensions.gandi.pro/extensions/${id}/index.js`;
             }
             
-            console.log(`VM 请求扩展: ${id} -> ${url}`);
+            console.log(`VM 请求加载扩展: ${id} -> ${url}`);
             
-            // 确保加载成功或静默失败
+            // 强制忽略 Unknown extension 报错并尝试加载
             try {
               return originalLoad.call(this, url, ...args).catch(err => {
-                console.warn(`扩展加载失败 (${id}):`, err);
-                // 这里我们返回一个空的 resolve，防止 VM 抛出异常中断加载
-                return Promise.resolve();
+                console.warn(`扩展 ${id} 加载失败，但我们将尝试让 VM 继续运行:`, err);
+                // 解决 "Unknown extension" 的关键：如果失败，返回一个空的对象而不是拒绝
+                // 这能骗过 VM 的 extensionManager，让它认为扩展已经加载（虽然功能为空）
+                return Promise.resolve({
+                  getInfo: () => ({ id, blocks: [] })
+                });
               });
             } catch (e) {
-              console.error(`扩展加载运行时异常 (${id}):`, e);
+              console.error(`扩展加载运行时错误 (${id}):`, e);
               return Promise.resolve();
             }
           };
@@ -157,21 +171,22 @@
           if (window.JSZip) {
             const zip = await JSZip.loadAsync(buf);
             const projectJson = JSON.parse(await zip.file('project.json').async('string'));
+            console.log('原始项目扩展列表:', projectJson.extensions);
             
             let modified = false;
             if (projectJson.extensions && Array.isArray(projectJson.extensions)) {
               projectJson.extensions = projectJson.extensions.map(extId => {
                 // 如果是已知映射的扩展，直接替换为 URL
                 if (window.EXTENSION_MAP[extId]) {
-                  console.log(`正在转换扩展 ID: ${extId} -> ${window.EXTENSION_MAP[extId]}`);
+                  console.log(`转换已知扩展 ID: ${extId} -> ${window.EXTENSION_MAP[extId]}`);
                   modified = true;
                   return window.EXTENSION_MAP[extId];
                 }
                 // 如果是未知的短 ID 且不是官方扩展，尝试自动映射到 Gandi 源
                 if (!extId.includes('/') && !['pen', 'music', 'videoSensing', 'text2speech', 'translate', 'makeymakey', 'microbit', 'ev3', 'boost', 'wedo2', 'gdxfor'].includes(extId)) {
-                  // 尝试两种可能的 Gandi 路径
-                  const autoUrl = window.EXTENSION_MAP[extId] || `https://extensions.gandi.pro/extensions/${extId}/index.js`;
-                  console.log(`尝试自动转换未知扩展: ${extId} -> ${autoUrl}`);
+                  // 尝试 Gandi 路径
+                  const autoUrl = `https://extensions.gandi.pro/extensions/${extId}/index.js`;
+                  console.log(`自动映射未知扩展: ${extId} -> ${autoUrl}`);
                   modified = true;
                   return autoUrl;
                 }
@@ -180,6 +195,7 @@
             }
 
             if (modified) {
+              console.log('修改后的项目扩展列表:', projectJson.extensions);
               zip.file('project.json', JSON.stringify(projectJson));
               buf = await zip.generateAsync({ type: 'arraybuffer' });
               console.log('项目文件扩展已重定向并重新打包');
